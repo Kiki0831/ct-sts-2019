@@ -19,12 +19,11 @@ Data cleaning, preprocessing, statistical testing, and plotting were performed u
 ---
 
 ## 📂 Repository Structure
-01_data/        # Raw datasets (Excel format) and data dictionary
+01_data/        # Raw datasets (Excel format) and data dictionary (private, not included)
 02_docs/        # Project background and instructions
 03_code/        # R scripts / RMarkdown for analysis
 04_reports/     # Final project presentation and report
 05_results/     # Generated analysis outputs (HTML, plots, tables)
-06_src/         # Source code or additional scripts
 
 ---
 
