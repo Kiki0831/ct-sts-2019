@@ -1,0 +1,9 @@
+tidyverse
+readxl
+arsenal
+dplyr
+ggplot2
+knitr
+scales
+
+install.packages(c("tidyverse", "readxl", "arsenal", "dplyr", "ggplot2", "knitr", "scales"))

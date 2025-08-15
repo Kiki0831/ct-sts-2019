@@ -1,0 +1,447 @@
+---
+title: "Clinical Trial in Soft Tissue Sarcoma"
+output: html_document
+---
+## Get ready with the data
+```{r setup, results = 'hide', message = FALSE}
+# list of packages used
+pkg <- c("tidyverse", "readxl", "arsenal")
+
+# activate packages
+lapply(pkg, library, character.only = TRUE)
+
+# grab source data
+baseline <- read_excel(
+  "SARC021_DATA.xlsx",
+  sheet = "Baseline information"
+)
+last_response <- read_excel(
+  "SARC021_DATA.xlsx",
+  sheet = "Last Tumor Respsonse"
+)
+best_response <- read_excel(
+  "SARC021_DATA.xlsx",
+  sheet = "Best Tumor Response"
+)
+adverse_event <- read_excel(
+  "SARC021_DATA.xlsx",
+  sheet = "Adverse Event"
+)
+
+```
+
+### Clean and Pre-process the Data
+```{r func}
+# this function provides table-1 data for categorical variables
+cat_compare <- function(x) {
+  # input x is a character string of a column name
+  comps <- baseline %>%
+    # summarize by var and arm to get number of subjects
+    group_by(ARMCD, get(x)) %>%
+    summarize(n = n()) %>%
+    # get percentage of each value for each arm
+    mutate(percent = round(100 * n / sum(n), 2)) %>%
+    # make a character variable in format for table
+    mutate(stat = paste0(n, " (", percent, "%)")) %>%
+    # drop the intermediate vars
+    select(-n,-percent) %>%
+    ungroup() %>%
+    # spread into the right structure for the table
+    spread(key = ARMCD, value = stat) %>%
+    # rename columns, create blank P column
+    transmute(
+      Characteristics = `get(x)`,
+      ArmA = A,
+      ArmB = B,
+      P = ""
+    ) %>%
+    # catch any NA cases resulting from an instance of a characteristic only
+    #   present in one arm but not the other
+    mutate(ArmA = if_else(!is.na(ArmA), ArmA, "0 (0%)"),
+           ArmB = if_else(!is.na(ArmB), ArmB, "0 (0%)"))
+  
+  # get p-val for homogeneity of proportions
+  if (x == "PSURGFL") {
+    # every value in this variable is "Y" so we have nothing to test
+    p_val <- ""
+  } else {
+    p_val <- baseline %>%
+      select(!!x, ARMCD) %>%
+      table() %>%
+      matrix(ncol = 2) %>%
+      fisher.test(workspace = 2e7) %>%
+      .$p.value %>%
+      round(3)
+  }
+  
+  # make header row with trait name and p-val
+  head_row <-
+    tibble(
+      Characteristics = paste("-", x),
+      ArmA = "",
+      ArmB = "",
+      P = as.character(p_val)
+    )
+  
+  # bind and output
+  rbind(head_row, comps)
+}
+
+```
+
+## Baseline Values Comparison
+
+```{r age_plot}
+ggplot(baseline, aes(AGE)) +
+  geom_histogram(bins = 30, fill = "#F8766D") +
+  facet_wrap(~ ARMCD) +
+  labs(title = "Histograms of age by study arm",
+         x = "age")
+
+```
+
+The histograms of age for each study arm indicate that the distributions of ages are not normal. Thus, it is most appropriate to use a rank-sum test to compare the median ages between the two arms. This is how the p-value for the age composition across arms was obtained.
+
+### Table. Baseline Information
+``` {r q1}
+# compute statistics for the age data
+ages <- baseline %>%
+  select(AGE, ARMCD) %>%
+  group_by(ARMCD) %>%
+  # all vars from example table
+  summarize(
+    mean = mean(AGE),
+    n = n(),
+    sd = sd(AGE),
+    median = median(AGE),
+    min = min(AGE),
+    max = max(AGE)
+  ) %>%
+  select(-ARMCD) %>%
+  signif(3) %>%
+  # add back in arm info
+  mutate(ARMCD = c("A", "B")) %>%
+  # shift arm to first column
+  select(ARMCD, everything())
+
+# calculate p-value for age data
+p_val <- kruskal.test(AGE ~ ARMCD, data = baseline) %>%
+  .$p.value %>%
+  signif(3)
+
+# labels for table
+Characteristics <- c("- AGE",
+                     "Mean +- SD",
+                     "Median (min, max)")
+
+# combine results into strings for table
+meanA <- paste0(ages[1, 2], " +- ", ages[1, 4])
+medianA <-
+  paste0(ages[1, 5], " (", ages[1, 6], ", ", ages[1, 7], ")")
+ArmA <- c("",
+          meanA,
+          medianA)
+meanB <- paste0(ages[2, 2], " +- ", ages[2, 4])
+medianB <-
+  paste0(ages[1, 5], " (", ages[1, 6], ", ", ages[1, 7], ")")
+ArmB <- c("",
+          meanB,
+          medianB)
+P <- c(p_val, "", "")
+
+# table with ages data in the right structure for the table
+age_tibble <- tibble(Characteristics, ArmA, ArmB, P)
+
+
+# get the names of all the character columns needing analysis
+char_cols <- baseline %>%
+  select(-SUBJID,-AGE,-ARMCD) %>%
+  names()
+
+# generate list of dfs containing the results for the table
+traits <- lapply(char_cols, cat_compare)
+
+# bind everything into the table
+groups_baseline <- bind_rows(age_tibble, traits)
+
+knitr::kable(groups_baseline, format = "markdown")
+
+```
+
+The categorical variables for each arm were compared using a Fisher's exact test. The p-values are all greater than $\alpha$ = 0.05, except for stage. In other words, the groups of subjects in each arm are similar when looking at all of the baseline variables except stage. We have evidence that the composition of subjects at each stage of their sarcoma differs across arms. This may have an important impact on the outcome of this study if one considers stage to influence the likelihood of positive response to treatment.
+
+**Criteria**:create a dataset named new_base after cleaning data to meet the criteria (delet 5 rows by filtering BECOG)
+```{r}
+#BECOG of 0 or 1
+table(baseline$BECOG)#  the number of 0 is 365, the number of 1 is 270, the number of 2 is 4
+sum(is.na(baseline$BECOG))# 1 NA in BECIG of Baseline_Information
+# remove the 4(2) and 1(NA) from the BECOG of Baseline_Infor
+#remove the BECOG which didn't meet the criteria
+new_base <- baseline%>%
+  filter(BECOG == 1|BECOG ==0)
+
+```
+
+**new_base Sheet** no NAs in ARMCD of the 635 patients (640-5(BECOG)=635)
+```{r}
+# new_base Sheet 
+length(unique(new_base$ARMCD))
+sum(is.na(new_base$ARMCD))
+table0 <- data.frame(table(new_base$ARMCD))
+table0 #317 patients in A, 323 patients in B, 640 in total
+
+```
+
+
+## Response Rate Comparison
+
+### Last Response
+**last_response Sheet**: 596 parients in last_response
+No NAs in RSORRES of last_response
+```{r}
+# last_response Sheet
+head(last_response)
+dim(last_response) # 596 parients in last_response
+
+# RSCAT
+# check the total levels of RSCAT of last_response
+length(unique(last_response$RSCAT))
+# check if there is NAs in RSCAT of last_response
+sum(is.na(last_response$RSCAT))# No Na in RSCAT
+
+# RSORRES
+# check the total levels of RSORRES of last_response
+length(unique(last_response$RSORRES))
+length(last_response$RSORRES) #Notice only 596 patients has the RSORRES in last_response
+# check if there are NAs in RSORRES of last_response
+sum(is.na(last_response$RSORRES)) # No NAs in RSORRES of last_response
+
+# Create table1 showing frequency of each levels occurrence in RSORRES of last_response
+table1 <- data.frame(table(last_response$RSORRES))
+table1
+
+```
+
+inner_join Baseline_Information and last_response: ????check the outcome of inner_join 635-596-594
+```{r}
+# check the dims of both dataset 
+dim(new_base)
+dim(last_response)
+
+#inner_join
+Base_Last <- inner_join(last_response, new_base, by = "SUBJID")
+dim(Base_Last)
+
+
+#create data set inner_last only containing ARMCD,RSORRES
+inner_last <- Base_Last %>%
+  select(ARMCD,RSORRES)
+unique(inner_last$RSORRES)
+sum(is.na(inner_last$RSORRES))
+```
+
+last_response: Method_2by2
+```{r}
+# RSORRES: Response assessment, PD: Progressive disease, PR = Partial, response, CR = Complete response, SD = stable disease, NE = Inevaluable
+inner_last%>%
+  mutate(result =recode(RSORRES,"PD"="No Response", "PR"="Partial response", "SD" = "No Response", "CR"="Complete response", "NE" ="No Response")) -> inner_last_2by2
+
+sampProps_last <- prop.table(table(inner_last_2by2$ARMCD, inner_last_2by2$result),1)
+sampProps_last
+table(inner_last_2by2$ARMCD, inner_last_2by2$result)
+# sample difference
+sampDiff_last <- sampProps_last[2,2]-sampProps_last[1,2]
+sampDiff_last 
+
+# Method1: chisq test
+chisq.test(table(inner_last_2by2$ARMCD, inner_last_2by2$result), correct =F)
+
+# Method2: relocation sampling
+random.allo <-function(reps, group, outcome){
+  propDiff <-rep(0,reps)
+  for(i in 1:reps){
+    randomGroup <-sample(group, replace=FALSE)
+    propTable <-prop.table(table(randomGroup,outcome),1)
+    propDiff[i] <- propTable[2,2]-propTable[1,2]
+  }
+  propDiff
+}
+
+sampleDiff_last <-random.allo(5000, inner_last_2by2$ARMCD, inner_last_2by2$result)
+1-(sum(sampDiff_last< -(abs(sampleDiff_last))|sampDiff_last> abs(sampleDiff_last)))/5000
+```
+
+For the last response rate, at the significance level of 0.05, the response rate in treatment A is not significantly different with treatment B, with the p value of 0.85. 
+
+
+### Best Response
+
+**best_response Sheet**: 48  Nas of 640 patients in  BESTRESP of best_response 
+only 592 patients could be used (640-48 = 592)
+```{r}
+# best_response Sheet
+head(best_response)
+dim(best_response) # 640 patients in best_response
+
+# check the total levels of BESTRESP of best_response
+length(unique(best_response$BESTRESP))
+length(best_response$BESTRESP) #640 patients have the BESTRESP in best_response
+
+# check if there are NAs in BESTRESP of last_response
+sum(is.na(best_response$BESTRESP))# There are 48 NAs in BESTRESP of best_response
+
+# Create table1 showing frequency of each levels occurrence in BESTRESPof last_response
+table1 <- data.frame(table(best_response$BESTRESP))
+table1
+```
+
+inner_join Baseline_Information and best_response
+```{r}
+# check the dims of both dataset
+dim(baseline)
+dim(best_response)
+
+#inner_join
+Base_Best <- inner_join(new_base, best_response, by = "SUBJID")
+dim(Base_Best)
+
+#create data set inner_last only containing ARMCD, BESTRESP
+inner_best <- Base_Best %>%
+  select(ARMCD,BESTRESP)
+
+unique(inner_best$BESTRESP)
+sum(is.na(inner_best$BESTRESP))# 45 NAs in inner_best, need I drop them to calculate the responce rate? I drop here
+
+#omit the rows with NAs in inner_best to create the dataset inner_best_nonna
+inner_best_nonna <- inner_best %>%
+na.omit()
+dim(inner_best)
+dim(inner_best_nonna)
+```
+
+
+
+best_response: Method_2by2
+```{r}
+# RSORRES: Response assessment, PD: Progressive disease, PR = Partial, response, CR = Complete response, SD = stable disease, NE = Inevaluable
+inner_best_nonna%>%
+  mutate(result =recode(BESTRESP,"PD"="No Response", "PR"="Partial response", "SD" = "No Response", "CR"="Complete response", "NE" ="Inevaluable")) -> inner_best_nonna_2by2
+dim(inner_best_nonna_2by2)
+
+sampProps_best <- prop.table(table(inner_best_nonna_2by2$ARMCD,  inner_best_nonna_2by2$result),1)
+sampProps_best 
+table(inner_best_nonna_2by2$ARMCD,inner_best_nonna_2by2$result)
+# sample difference
+sampDiff_best <- sampProps_best[2,2]-sampProps_best[1,2]
+sampDiff_best
+
+
+# Method1: chisq test
+chisq.test(table(inner_best_nonna_2by2$ARMCD, inner_best_nonna_2by2$result), correct = F)$p.value
+
+
+# Method2: relocation sampling
+random.allo <-function(reps, group, outcome){
+  propDiff <-rep(0,reps)
+  for(i in 1:reps){
+    randomGroup <-sample(group, replace=FALSE)
+    propTable <-prop.table(table(randomGroup,outcome),1)
+    propDiff[i] <- propTable[2,2]-propTable[1,2]
+  }
+  propDiff
+}
+
+sampleDiff_best <-random.allo(5000, inner_best_nonna_2by2$ARMCD, inner_best_nonna_2by2$result)
+1-(sum(sampDiff_best< -(abs(sampleDiff_best))|sampDiff_best> abs(sampleDiff_best)))/5000
+```
+
+For the best response rate, at the significance level of 0.05, the response rate in treatment A is significanly different with treatment B, with the p value of 0.0038. The response rate of A is higher than treatment B. 
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# 1) recategorize：CR / PR / No Response
+plot_df <- inner_best_nonna_2by2 %>%
+  mutate(result3 = case_when(
+    grepl("Complete", result, ignore.case = TRUE) ~ "Complete Response",
+    grepl("Partial",  result, ignore.case = TRUE) ~ "Partial Response",
+    TRUE ~ "No Response"   # SD/PD/NE/NR -> No Response
+  )) %>%
+  mutate(
+    result3 = factor(result3,
+                     levels = c("Complete Response","Partial Response","No Response")),
+    ARMCD   = factor(ARMCD, labels = c("Combination Treatment Group",
+                                       "Doxorubicin Alone Group"))
+  ) %>%
+  count(ARMCD, result3, name = "n") %>%
+  group_by(ARMCD) %>%
+  mutate(pct = n / sum(n))
+
+# 2) drawing
+ggplot(plot_df, aes(x = ARMCD, y = pct, fill = result3)) +
+  geom_col(width = 0.7) +
+  geom_text(aes(label = scales::percent(pct, accuracy = 0.01)),
+            position = position_stack(vjust = 0.5), size = 3) +
+  scale_y_continuous(labels = scales::percent,
+                     limits = c(0,1), expand = c(0,0)) +
+  scale_fill_manual(values = c("#00E6FF", "#2BBBD8", "#FFD23F"), name = NULL) +
+  labs(x = "Treatment Group", y = "Response Rate",
+       title = "Figure 1 Response Rates by Treatment Groups (%)") +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom",
+        plot.title = element_text(hjust = 0.5, face = "bold.italic"))
+```
+
+
+## Summarise Adverse Event Data
+
+```{r}
+# Merge adverse_event and baseline.info dataset. (Select the variables in the dictionary first)
+adverse_event <- adverse_event %>%
+  inner_join(baseline) %>%
+  filter(BECOG %in% c(0,1)) %>%
+  arrange(SUBJID) %>%
+  select(SUBJID, AESOC, AESER, AEOUT, AETOXGR, STAGE, ARMCD)
+
+```
+
+
+```{r}
+aesoc <- adverse_event %>%
+  group_by(AESOC) %>%
+  summarise(n = n()) %>%
+  arrange(desc(n))
+# The number of the unique AESOCs.
+nrow(aesoc)
+# The proportion of top 10 AESOCs.
+prop_top10_aesoc <- sum(aesoc[1:10,2]/nrow(adverse_event))
+round(prop_top10_aesoc, 4)
+# The names of top 10 AESOCs.
+top10_aesoc <- aesoc[1:10,1]
+top10_aesoc
+```
+
+* The top 10 among 24 different system organ classes constitute more than 90% of the whole adverse event record size. So it is proper to filter those 10 in the following analysis.
+
+
+```{r}
+ae_file <- adverse_event %>%
+  select(ARMCD, AESOC, AESER, AEOUT, AETOXGR) %>%
+  # AETOXGR is originally a numeric and is supposed to be a factor.
+  mutate(AETOXGR = as.factor(AETOXGR)) %>%
+  # Select the top 10 AESOC and order the result.
+  filter(AESOC %in% unlist(top10_aesoc)) %>%
+  mutate(AESOC = factor(AESOC, levels = unlist(top10_aesoc)))
+ae_file
+```
+
+## Table. AE Profile Comparison between Arm A and B.
+```{r, results = 'asis'}
+# All the four characteristics are categorial variables. Test is chisq by default.
+summary(tableby(ARMCD ~ AESER + AEOUT + AETOXGR + AESOC, data = ae_file))
+```
+
+
+
+

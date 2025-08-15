@@ -1,0 +1,251 @@
+---
+title: "Biostat_final_q3"
+author: "Yueqi Feng"
+date: "11/12/2019"
+output: html_document
+---
+```{r,message=FALSE,warning=FALSE}
+library(readxl)
+library(tidyverse)
+library(stringr) # work with strings
+```
+
+```{r,message=FALSE,warning=FALSE}
+# import data
+baseline.info <- read_excel("SARC021_DATA.xlsx", sheet = 1)
+adverse.event <- read_excel("SARC021_DATA.xlsx", sheet = 2)
+last.tumor <- read_excel("SARC021_DATA.xlsx", sheet = 3)
+best.tumor <- read_excel("SARC021_DATA.xlsx", sheet = 4)
+
+# merge baseline.info and adverse.event
+adverse.event <- adverse.event %>%
+  select(SUBJID,AESEQ, AETERM, AESOC, AESER, AEREL, AEOUT, AETOXGR) %>%
+  inner_join(baseline.info) %>% ## Joining, by = "SUBJID"
+  arrange(SUBJID,AESEQ)
+```
+
+```{r}
+# Summarise AETERM (Reported Term for the Adverse Event)
+adverse.event %>%
+  mutate(AETERM = str_to_title(AETERM)) %>%
+  group_by(AETERM) %>%
+  summarise(n = n()) %>%
+  arrange(desc(n)) %>%
+  head(10)
+```
+
+```{r}
+# Summarise AESOC (Primary System Organ Class)
+adverse.event %>%
+  group_by(AESOC) %>%
+  summarise(n = n()) %>%
+  arrange(desc(n)) 
+```
+
+```{r,message=FALSE,warning=FALSE,results='asis'}
+library(arsenal) #large-scale statistical summaries
+ae.file <- adverse.event %>%
+  select(ARMCD, AESOC, AESER, AEOUT, AETOXGR) %>% #AEMCD:Planned Arm Code
+  mutate(AETOXGR = as.factor(AETOXGR)) #Toxicity grade
+summary(tableby(ARMCD ~ ., data = ae.file, total = F))
+```
+
+# Summarise Reported Term for the Adverse Event.
+```{r}
+library(stringr)
+aeterm <- adverse.event %>%
+  # Delete the case problem in AETERM.
+  mutate(AETERM = str_to_title(AETERM)) %>%
+  group_by(AETERM) %>%
+  summarise(n = n()) %>%
+  arrange(desc(n))
+# The number of the unique AETERMs.
+nrow(aeterm)
+```
+
+```{r}
+# The proportion of top 10 AETERMS.
+prop.top10.aeterm <- sum(aeterm[1:10,2]/nrow(adverse.event))
+round(prop.top10.aeterm, 4)
+```
+As there are 2970 unique adverse event terms out of 9490 observations, and the top 10 totally make up only 26.66%, it is hard to split this variable up for analysis.
+
+
+# Summarise Primary System Organ Class
+```{r}
+aesoc <- adverse.event %>%
+  group_by(AESOC) %>%
+  summarise(n = n()) %>%
+  arrange(desc(n))
+# The number of the unique AESOCs.
+nrow(aesoc)
+```
+
+```{r}
+# The proportion of top 10 AESOCs.
+prop.top10.aesoc <- sum(aesoc[1:10,2]/nrow(adverse.event))
+round(prop.top10.aesoc, 4)
+```
+
+```{r}
+# The names of top 10 AESOCs.
+top10.aesoc <- aesoc[1:10,1]
+top10.aesoc
+```
+
+# Table 1. AE Profile Comparison between Arm A and B.
+```{r}
+library(arsenal)
+ae.file <- adverse.event %>%
+  select(ARMCD, STAGE, PCHEMFL, AESOC, AESER, AEOUT, AETOXGR) %>%
+  # AETOXGR is originally a numeric and is supposed to be a factor.
+  mutate(AETOXGR = as.factor(AETOXGR)) %>%
+  # Select the top 10 AESOC and order the result.
+  filter(AESOC %in% unlist(top10.aesoc)) %>%
+  mutate(AESOC = factor(AESOC, levels = unlist(top10.aesoc)))
+# All the four characteristics are categorial variables. Test is chisq by default.
+```
+
+```{r,results='asis'}
+summary(tableby(ARMCD ~ AESER + AEOUT + AETOXGR + AESOC, data = ae.file, total = F))
+```
+
+# Table 2. AE Profile Comparison Stratified by Stage.(Stage at Diagnosis)
+```{r,results='asis'}
+summary(tableby(ARMCD ~ AESER + AEOUT + AETOXGR + AESOC, strata = STAGE, data = ae.file, total = T))
+```
+
+# Table 3. AE Profile Comparison Stratified by PCHEMFL.(Prior Systemic Therapy Flag)
+```{r,results='asis'}
+summary(tableby(ARMCD ~ AESER + AEOUT + AETOXGR + AESOC, strata = PCHEMFL, data = ae.file, total = T))
+```
+
+# AETERM (Reported Term for the Adverse Event)
+## Check the difference in AETERM (Reported Term for the Adverse Event) between arm A and arm B
+```{r}
+ae_A <- adverse.event %>%
+  select(ARMCD, STAGE, PCHEMFL, AESOC, AETERM,AESER, AEOUT, AETOXGR) %>%
+  # AETOXGR is originally a numeric and is supposed to be a factor.
+  mutate(AETOXGR = as.factor(AETOXGR)) %>%
+  filter(ARMCD=="A") %>%  # 6051 patients were enrolled in arm A
+  mutate(AETERM = str_to_title(AETERM)) %>%
+  group_by(AETERM) %>%
+  summarise(N=n()) %>%
+  arrange(desc(N)) %>%
+  mutate(N=round(N/6051,2)) %>%
+  head(10)
+
+ae_B <- adverse.event %>%
+  select(ARMCD, STAGE, PCHEMFL, AESOC, AETERM,AESER, AEOUT, AETOXGR) %>%
+  # AETOXGR is originally a numeric and is supposed to be a factor.
+  mutate(AETOXGR = as.factor(AETOXGR)) %>%
+  filter(ARMCD=="B") %>% #3439 patients were enrolled in arm B
+  mutate(AETERM = str_to_title(AETERM)) %>%
+  group_by(AETERM) %>%
+  summarise(N=n()) %>%
+  arrange(desc(N)) %>%
+  mutate(N=round(N/3439,2)) %>%
+  head(10) 
+ 
+ae_A == ae_B
+ae_A[c(1,3,4,10),]
+# A and B have 4 same adverse event (Nausea, Fatigue, Alopecia and Vomiting)
+
+intersect(ae_A[,1],ae_B[,1])
+
+ae_AB10 <- data.frame(ae_A[,1],ae_B[,1])
+colnames(ae_AB10) <- c("Arm A","Arm B")
+ae_AB10
+
+inner_join(ae_A,ae_B,by=c("AETERM"))
+
+# Remove duplicate rows of the dataframe using cyl and vs variables
+distinct(adverse.event, SUBJID, .keep_all= TRUE)
+```
+
+# AETERM Stratified by Stage.(Stage at Diagnosis)
+```{r}
+#Stage I
+s1 <- adverse.event %>%
+  select(ARMCD, STAGE, PCHEMFL, AESOC, AETERM,AESER, AEOUT, AETOXGR) %>%
+  # AETOXGR is originally a numeric and is supposed to be a factor.
+  mutate(AETOXGR = as.factor(AETOXGR)) %>%
+  filter(STAGE== "Stage I") %>%  #519 patients were stage 1
+  mutate(AETERM = str_to_title(AETERM)) %>%
+  group_by(AETERM) %>%
+  summarise(N=n()) %>%
+  arrange(desc(N)) %>%
+  mutate(N=round(N/519,2)) %>%
+  head(10)
+#Stage II
+s2 <- adverse.event %>%
+  select(ARMCD, STAGE, PCHEMFL, AESOC, AETERM,AESER, AEOUT, AETOXGR) %>%
+  # AETOXGR is originally a numeric and is supposed to be a factor.
+  mutate(AETOXGR = as.factor(AETOXGR)) %>%
+  filter(STAGE== "Stage II") %>% #2120 patients were in stage 2
+  mutate(AETERM = str_to_title(AETERM)) %>%
+  group_by(AETERM) %>%
+  summarise(N=n()) %>%
+  arrange(desc(N)) %>%
+  mutate(N=round(N/2120,2)) %>%
+  head(10)
+#Stage III
+s3 <- adverse.event %>%
+  select(ARMCD, STAGE, PCHEMFL, AESOC, AETERM,AESER, AEOUT, AETOXGR) %>%
+  # AETOXGR is originally a numeric and is supposed to be a factor.
+  mutate(AETOXGR = as.factor(AETOXGR)) %>%
+  filter(STAGE== "Stage III") %>% #3879 patients were in stage 3
+  mutate(AETERM = str_to_title(AETERM)) %>%
+  group_by(AETERM) %>%
+  summarise(N=n()) %>%
+  arrange(desc(N)) %>%
+  mutate(N=round(N/3879,2)) %>%
+  head(10)
+#Stage IV
+s4 <- adverse.event %>%
+  select(ARMCD, STAGE, PCHEMFL, AESOC, AETERM,AESER, AEOUT, AETOXGR) %>%
+  # AETOXGR is originally a numeric and is supposed to be a factor.
+  mutate(AETOXGR = as.factor(AETOXGR)) %>%
+  filter(STAGE== "Stage IV") %>%  #2809 patients were in stage 4
+  mutate(AETERM = str_to_title(AETERM)) %>%
+  group_by(AETERM) %>%
+  summarise(N=n()) %>%
+  arrange(desc(N)) %>%
+  mutate(N=round(N/2809,2)) %>%
+  head(10)
+
+ae_stage <- data.frame(s1,s2,s3,s4)
+colnames(ae_stage) <- c("Stage I","N%", "Stage II","N%","Stage III","N%","Stage IV","N%")
+ae_stage
+```
+
+## AE Stratified by PCHEMFL.(Prior Systemic Therapy Flag)
+```{r}
+P_N <- adverse.event %>%
+  select(ARMCD, STAGE, PCHEMFL, AESOC, AETERM,AESER, AEOUT, AETOXGR) %>%
+  # AETOXGR is originally a numeric and is supposed to be a factor.
+  mutate(AETOXGR = as.factor(AETOXGR)) %>%
+  filter(PCHEMFL== "N") %>% # 8796 patients had Prior Systemic Therapy Flag
+  mutate(AETERM = str_to_title(AETERM)) %>%
+  group_by(AETERM) %>%
+  summarise(N=n()) %>%
+  arrange(desc(N)) %>%
+  mutate(N=round(N/8796,2)) %>%
+  head(10)
+
+P_Y <- adverse.event %>%
+  select(ARMCD, STAGE, PCHEMFL, AESOC, AETERM,AESER, AEOUT, AETOXGR) %>%
+  # AETOXGR is originally a numeric and is supposed to be a factor.
+  mutate(AETOXGR = as.factor(AETOXGR)) %>%
+  filter(PCHEMFL== "Y") %>%  #694 patients had not Prior Systemic Therapy Flag
+  mutate(AETERM = str_to_title(AETERM)) %>%
+  group_by(AETERM) %>%
+  summarise(N=n()) %>%
+  arrange(desc(N)) %>%
+  mutate(N=round(N/694,2)) %>%
+  head(10)
+
+ae_PCHEMFL <- data.frame(P_Y,P_N)
+colnames(ae_PCHEMFL) <- c("PCHEMFL_Y","N%","PCHEMFL_N","N%")
+ae_PCHEMFL
+```
